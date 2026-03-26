@@ -23,33 +23,37 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller PySide6 yt-dlp
     
-    - name: Find and list Python files
+    - name: Check for icon file
       run: |
-        echo "Searching for main.py..."
-        Get-ChildItem -Recurse -Filter "main.py" | ForEach-Object { Write-Host $_.FullName }
-        
-        echo ""
-        echo "Repository structure:"
-        Get-ChildItem -Recurse -Directory | Select-Object -First 20 FullName
+        if (Test-Path "icon.ico") {
+          Write-Host "✓ Icon file found"
+        } else {
+          Write-Host "⚠ No icon file found (optional)"
+        }
     
-    - name: Build EXE (attempt 1 - if in tiktok_downloader_licensed folder)
-      continue-on-error: true
+    - name: Build executable with PyInstaller
       run: |
         cd tiktok_downloader_licensed
-        pyinstaller --onefile --windowed --name "TikDL" `
-          --add-data "core:core" `
-          --add-data "ui:ui" `
-          --add-data "utils:utils" `
-          --hidden-import=PySide6 `
-          --hidden-import=yt_dlp `
-          main.py
-        echo "Build attempt 1 completed"
-    
-    - name: Build EXE (attempt 2 - if in root folder)
-      continue-on-error: true
-      run: |
-        if (-Not (Test-Path "dist\TikDL.exe")) {
-          echo "Build from root folder..."
+        
+        # Copy icon from root if it exists
+        if (Test-Path "..\icon.ico") {
+          Copy-Item "..\icon.ico" -Destination "icon.ico"
+          Write-Host "Icon copied to build directory"
+        }
+        
+        # Build with or without icon
+        if (Test-Path "icon.ico") {
+          Write-Host "Building with custom icon..."
+          pyinstaller --onefile --windowed --name "TikDL" `
+            --add-data "core:core" `
+            --add-data "ui:ui" `
+            --add-data "utils:utils" `
+            --hidden-import=PySide6 `
+            --hidden-import=yt_dlp `
+            -i icon.ico `
+            main.py
+        } else {
+          Write-Host "Building without custom icon..."
           pyinstaller --onefile --windowed --name "TikDL" `
             --add-data "core:core" `
             --add-data "ui:ui" `
@@ -59,37 +63,18 @@ jobs:
             main.py
         }
     
-    - name: Check for EXE (attempt 1 location)
-      continue-on-error: true
+    - name: Verify executable exists
       run: |
         if (Test-Path "tiktok_downloader_licensed\dist\TikDL.exe") {
-          echo "Found EXE in tiktok_downloader_licensed/dist/"
+          $size = (Get-Item "tiktok_downloader_licensed\dist\TikDL.exe").Length / 1MB
+          Write-Host "✓ TikDL.exe created ($([Math]::Round($size, 2)) MB)"
           Move-Item -Path "tiktok_downloader_licensed\dist\TikDL.exe" -Destination "TikDL.exe"
-          echo "Moved to root"
-        }
-    
-    - name: Check for EXE (attempt 2 location)
-      continue-on-error: true
-      run: |
-        if (Test-Path "dist\TikDL.exe") {
-          echo "Found EXE in dist/"
-          Copy-Item -Path "dist\TikDL.exe" -Destination "TikDL.exe"
-        }
-    
-    - name: Verify EXE exists
-      run: |
-        if (Test-Path "TikDL.exe") {
-          $size = (Get-Item "TikDL.exe").Length / 1MB
-          Write-Host "✓ SUCCESS: TikDL.exe created ($([Math]::Round($size, 2)) MB)"
         } else {
-          Write-Host "✗ FAILED: TikDL.exe not found"
-          Write-Host "Checking all locations:"
-          Get-ChildItem -Recurse -Filter "TikDL.exe"
+          Write-Host "✗ TikDL.exe not found!"
           exit 1
         }
     
     - name: Upload artifact
-      if: success()
       uses: actions/upload-artifact@v4.4.3
       with:
         name: TikDL-Windows-Executable
