@@ -3,8 +3,6 @@ name: Build TikDL Executable
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -19,120 +17,81 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip'
     
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip setuptools wheel
-        pip install pyinstaller>=6.0.0
-        pip install "PySide6>=6.6.0"
-        pip install "yt-dlp>=2024.1.0"
+        python -m pip install --upgrade pip
+        pip install pyinstaller PySide6 yt-dlp
     
-    - name: Display Python version
-      run: python -c "import sys; print(sys.version)"
+    - name: Find and list Python files
+      run: |
+        echo "Searching for main.py..."
+        Get-ChildItem -Recurse -Filter "main.py" | ForEach-Object { Write-Host $_.FullName }
+        
+        echo ""
+        echo "Repository structure:"
+        Get-ChildItem -Recurse -Directory | Select-Object -First 20 FullName
     
-    - name: List installed packages
-      run: pip list
-    
-    - name: Navigate to application directory
-      run: cd tiktok_downloader_licensed && dir
-    
-    - name: Build executable with PyInstaller
+    - name: Build EXE (attempt 1 - if in tiktok_downloader_licensed folder)
+      continue-on-error: true
       run: |
         cd tiktok_downloader_licensed
-        pyinstaller --onefile `
-          --windowed `
-          --name "TikDL" `
-          --distpath "dist" `
-          --buildpath "build" `
-          --specpath "." `
+        pyinstaller --onefile --windowed --name "TikDL" `
           --add-data "core:core" `
           --add-data "ui:ui" `
           --add-data "utils:utils" `
           --hidden-import=PySide6 `
-          --hidden-import=PySide6.QtCore `
-          --hidden-import=PySide6.QtGui `
-          --hidden-import=PySide6.QtWidgets `
-          --hidden-import=PySide6.QtNetwork `
           --hidden-import=yt_dlp `
-          --hidden-import=yt_dlp.utils `
-          --hidden-import=yt_dlp.extractor `
           main.py
+        echo "Build attempt 1 completed"
     
-    - name: Verify executable exists
+    - name: Build EXE (attempt 2 - if in root folder)
+      continue-on-error: true
       run: |
-        if (Test-Path "tiktok_downloader_licensed/dist/TikDL.exe") {
-          Write-Host "✓ TikDL.exe created successfully"
-          $size = (Get-Item "tiktok_downloader_licensed/dist/TikDL.exe").Length / 1MB
-          Write-Host "File size: $([Math]::Round($size, 2)) MB"
+        if (-Not (Test-Path "dist\TikDL.exe")) {
+          echo "Build from root folder..."
+          pyinstaller --onefile --windowed --name "TikDL" `
+            --add-data "core:core" `
+            --add-data "ui:ui" `
+            --add-data "utils:utils" `
+            --hidden-import=PySide6 `
+            --hidden-import=yt_dlp `
+            main.py
+        }
+    
+    - name: Check for EXE (attempt 1 location)
+      continue-on-error: true
+      run: |
+        if (Test-Path "tiktok_downloader_licensed\dist\TikDL.exe") {
+          echo "Found EXE in tiktok_downloader_licensed/dist/"
+          Move-Item -Path "tiktok_downloader_licensed\dist\TikDL.exe" -Destination "TikDL.exe"
+          echo "Moved to root"
+        }
+    
+    - name: Check for EXE (attempt 2 location)
+      continue-on-error: true
+      run: |
+        if (Test-Path "dist\TikDL.exe") {
+          echo "Found EXE in dist/"
+          Copy-Item -Path "dist\TikDL.exe" -Destination "TikDL.exe"
+        }
+    
+    - name: Verify EXE exists
+      run: |
+        if (Test-Path "TikDL.exe") {
+          $size = (Get-Item "TikDL.exe").Length / 1MB
+          Write-Host "✓ SUCCESS: TikDL.exe created ($([Math]::Round($size, 2)) MB)"
         } else {
-          Write-Host "✗ TikDL.exe not found!"
+          Write-Host "✗ FAILED: TikDL.exe not found"
+          Write-Host "Checking all locations:"
+          Get-ChildItem -Recurse -Filter "TikDL.exe"
           exit 1
         }
     
-    - name: Upload executable artifact
+    - name: Upload artifact
+      if: success()
       uses: actions/upload-artifact@v4.4.3
       with:
         name: TikDL-Windows-Executable
-        path: tiktok_downloader_licensed/dist/TikDL.exe
-        compression-level: 0
-        retention-days: 30
+        path: TikDL.exe
         if-no-files-found: error
-    
-    - name: Upload full dist folder
-      uses: actions/upload-artifact@v4.4.3
-      with:
-        name: TikDL-Full-Build
-        path: tiktok_downloader_licensed/dist/
-        compression-level: 9
-        retention-days: 30
-    
-    - name: Create GitHub Release (if tagged)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: tiktok_downloader_licensed/dist/TikDL.exe
-        draft: false
-        prerelease: false
-        body: |
-          # TikDL Release
-          
-          **Executable:** TikDL.exe
-          
-          ## Features
-          - TikTok video downloader
-          - YouTube video support
-          - Batch download capability
-          - Licensed version
-          
-          ## How to Use
-          1. Download `TikDL.exe`
-          2. Run it directly (no installation needed)
-          3. Windows may ask for permission on first run (normal)
-          
-          ## System Requirements
-          - Windows 7 or newer
-          - No Python installation required
-          - ~300MB disk space
-          
-          ## Support
-          For issues, please check the repository or create an issue.
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-status:
-    needs: build-windows
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-    - name: Check build status
-      run: |
-        echo "Build Status: ${{ needs.build-windows.result }}"
-        if [ "${{ needs.build-windows.result }}" = "success" ]; then
-          echo "✓ EXE built successfully!"
-          echo "Download from the Artifacts section"
-        else
-          echo "✗ Build failed. Check logs above."
-          exit 1
-        fi
